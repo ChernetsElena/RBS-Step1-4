@@ -1,0 +1,139 @@
+package main
+
+import (
+	"bufio"
+	"errors"
+	"flag"
+	"fmt"
+	"io/ioutil"
+	"log"
+	"net/http"
+	"os"
+	"path"
+	"strings"
+	"time"
+)
+
+func main() {
+
+	// чтение аргументов
+	var (
+		datafile *string
+		dir      *string
+		logFlag  *bool
+	)
+
+	datafile = flag.String("datafile", "urls.txt", `Path to datafile."`)
+	dir = flag.String("dir", "dir", `Path to dir."`)
+	logFlag = flag.Bool("log", false, `Write logs to file."`)
+
+	flag.Parse()
+
+	// открытие файла
+	urlFile, err := os.Open(*datafile)
+	if err != nil {
+		writeError(err, *logFlag)
+		os.Exit(1)
+	}
+	defer urlFile.Close()
+	writeInfo("Открытие файла: "+*datafile, *logFlag)
+
+	// создание директории
+	if _, err := os.Stat(*dir); os.IsNotExist(err) {
+		os.MkdirAll(*dir, 0777)
+	}
+
+	// чтение файла
+	writeInfo("Чтение файла: "+*datafile, *logFlag)
+	scanner := bufio.NewScanner(urlFile)
+
+	start := time.Now()
+	for scanner.Scan() {
+		address := string(scanner.Text())
+		body := MakeRequest(address, *logFlag)
+
+		fileName := strings.Replace(address, "https://", "", -1)
+		fileName = strings.Replace(fileName, "http://", "", -1)
+		fileName = strings.Replace(fileName, "/", ".", -1)
+
+		// создание файла
+		//pathjoin добавить
+		filePath := path.Join(*dir, fileName+".html")
+		file, err := os.Create(filePath)
+		if err != nil {
+			writeError(err, *logFlag)
+		}
+		defer file.Close()
+		writeInfo("Создание файла: "+filePath, *logFlag)
+
+		// запись в файл
+		file.Write(body)
+		writeInfo("Запись в файл: "+filePath, *logFlag)
+	}
+	elapsedTime := time.Since(start)
+
+	if err := scanner.Err(); err != nil {
+		writeError(err, *logFlag)
+	}
+
+	fmt.Println("Total Time For Execution: " + elapsedTime.String())
+}
+
+// функция отправляет запрос и получает данные
+func MakeRequest(
+	address string,
+	logFlag bool) (body []byte) {
+
+	resp, err := http.Get(address)
+	if r := recover(); r != nil {
+		writeError(err, logFlag)
+	}
+
+	writeInfo("Отправка GET запроса на адрес: "+address, logFlag)
+
+	if resp == nil {
+		writeError(errors.New("Resp is nil"), logFlag)
+		return
+	}
+
+	body, err = ioutil.ReadAll(resp.Body)
+	if r := recover(); r != nil {
+		writeError(err, logFlag)
+	}
+	defer resp.Body.Close()
+
+	writeInfo("Получение данных с адреса: "+address, logFlag)
+
+	return
+}
+
+func writeInfo(infoMessage string, logFlag bool) {
+	if logFlag {
+		// создание файла для логов
+		logFile, err := os.OpenFile("info.log", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer logFile.Close()
+
+		infoLogFile := log.New(logFile, "INFO\t", log.Ldate|log.Ltime)
+
+		infoLogFile.Printf(infoMessage)
+	}
+	log.Println("INFO\t" + infoMessage)
+}
+
+func writeError(errorMessage error, logFlag bool) {
+
+	if logFlag {
+		logFile, err := os.OpenFile("info.log", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer logFile.Close()
+
+		errorLogFile := log.New(logFile, "ERROR\t", log.Ldate|log.Ltime|log.Lshortfile)
+		errorLogFile.Println(errorMessage)
+	}
+	log.Println(errors.New("ERROR\t"), errorMessage)
+}
